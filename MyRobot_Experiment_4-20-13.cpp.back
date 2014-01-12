@@ -1,0 +1,987 @@
+#include "WPILib.h"
+#include <math.h>
+#include "GyroReader.h"
+#include "Drivetrain.h"
+#include "Toggler.h"
+#include "Buttons.h"
+#include "AvgCounter.h"
+
+class Robot : public IterativeRobot
+{
+	//Testing for digital IO
+	DigitalInput *limitswitch; //TODO make it work! (or delete if electrical team can make it work without help)
+	
+	RobotDrive *drivetrain; // robot drive system
+	
+	Joystick *driverL;
+	Joystick *driverR;
+	Joystick *joystick3;
+	
+	// Togglers
+	Toggler *intakeToggler;
+	Toggler *conveyorToggler;
+	// Toggler for the shooter
+	Toggler *shooterToggler;
+	Toggler *shooterDeployToggler;
+	Toggler *climberDeployToggler;
+	//Toggler *medToggler;
+
+	// Driver Station
+	DriverStation *driverStation;
+	DriverStationLCD *driverStationLCD;
+
+	// Compressor
+	Compressor *compressor;
+
+	// Driver Station digital I/Os
+	bool digitalIOs[8];
+	
+	// Gear shifting
+	Solenoid *gearUp;
+	Solenoid *gearDown;
+	
+
+	// Shooter motors
+	Victor *shooterOrange;
+	Victor *shooterBlue;
+	
+	// Climbing motors
+	//Victor *climberA;
+	//Victor *climberB;
+	
+	// Trigger Motor
+	Victor *trigger;
+	
+	// Intake Motor
+	Victor *intakeRoller;
+	
+	// Conveyor Motor; 
+	Victor *conveyor;
+	
+	// Intake Deploy Solenoid
+	Solenoid *intakeDeploy;
+	Solenoid *intakeUndeploy;
+	
+	// Shooter Deploy Solenoid
+	Solenoid *shooterDeploy;
+	Solenoid *shooterUndeploy;
+	
+	//Climber Deploy Solenoid
+	Solenoid *climberDeploy;
+	Solenoid *climberUndeploy;
+	
+	// Encoders on drivetrain
+	Encoder *right_encoder;
+	Encoder *left_encoder;
+	
+	
+	// Timer
+	Timer *autoTimer;
+	
+	Victor *testVictor;
+	
+	//Proximity sensor
+	DigitalInput *triggerProximitySensor8;
+	DigitalInput *triggerProximitySensor9;
+	
+	int testLoops;
+	
+	float sendTo; //for potentially ramping in autonomous
+	
+	float bangbangValue; //for use with bangbang();
+	
+//use_counter: 1 is counter, 0 is not.
+#define USE_COUNTER 1
+	
+#if USE_COUNTER
+	AvgCounter *testShooterCounter;	
+#else
+	// Encoders on shooter
+	Encoder *blue_shooter_encoder;
+#endif	
+	
+public:
+	Robot()
+	{
+		//TODO change all the ports back. The REAL ports are on a comment next to the thing
+		//(as opposed to for the practice bot)
+		//and will be marked with a todo.
+		//Yeah.
+		//Hopefully more  code will not need to be tweaked for the practice bot for a while.
+		drivetrain = new RobotDrive(8, 9, 1, 7);//TODO(10, 3); // these must be initialized in the same 
+		// order as they are declared above.
+		driverStation = DriverStation::GetInstance();
+		driverStationLCD = DriverStationLCD::GetInstance();
+		
+		//Init DigitalInput for testing
+		limitswitch = new DigitalInput(2); //TODO make it work! (or delete if the electrical team can fix it without help)
+		
+		// Init compressor
+		compressor = new Compressor(6, 2);
+		
+		// Initialize joysticks
+		driverL = new Joystick(1);
+		driverR = new Joystick(2);
+		joystick3 = new Joystick(3);
+		
+		// TODO: Change all of these pins...
+		
+		// Initialize solenoids
+		gearUp = new Solenoid(8);
+		gearDown = new Solenoid(7);
+				
+		// Initialize intake roller
+		intakeRoller = new Victor (4);//TODO(4); //intake roller is reversed
+		
+		// Initialize conveyor
+		conveyor = new Victor(2);// TODO (8);
+		
+		// Initialize trigger
+		trigger = new Victor(5); //TODO(2); //trigger wheel goes to the back.
+		
+		// Initialize shooters
+		shooterOrange = new Victor(3);//TODO(6);
+		shooterBlue = new Victor(6);//TODO(7);
+		
+		// Initialize all climbers
+		//climberA = new Victor(9);
+		//climberB = new Victor(10);
+		
+		// Initialize intake deployer
+		intakeDeploy = new Solenoid(5);
+		intakeUndeploy = new Solenoid(6);
+		
+		// Initialize shooter deployer
+		shooterDeploy = new Solenoid(4);
+		shooterUndeploy = new Solenoid(3);
+		
+		// Initialize climber deployer
+		climberDeploy = new Solenoid(1);
+		climberUndeploy = new Solenoid(2);
+
+		// Initialize encoders
+		right_encoder = new Encoder(2, 3, true);
+		left_encoder = new Encoder(4, 5, true);
+		
+		
+		// Intialize intake toggler
+		intakeToggler = new Toggler();
+		
+		// Initialize conveyor toggler
+		conveyorToggler = new Toggler();
+		
+		// Initialize shooter toggler
+		shooterToggler = new Toggler();
+		//medToggler = new Toggler();
+		
+		// Initialize shooter deploy toggler
+		shooterDeployToggler = new Toggler();
+		
+		// Initialize climbing toggler
+		climberDeployToggler = new Toggler();
+		
+		//Autonomous timer
+		autoTimer = new Timer();
+		
+		//proximity sensor
+		//triggerProximitySensor8 = new DigitalInput(8);
+		//triggerProximitySensor9 = new DigitalInput(9);
+		
+		testLoops = 0;
+		
+		sendTo = .5;
+		
+#if USE_COUNTER
+		testShooterCounter = new AvgCounter(1); //TODO change the values for the real robot
+		testShooterCounter->SetUpSourceEdge(true, false); //read UP not DOWN.
+		testShooterCounter->SetSamplesToAverage(125); //magic number from CD
+		bangbangValue = 7000.0f;
+#else
+		blue_shooter_encoder = new Encoder(13, 14, false);
+		bangbangValue = 375;
+#endif
+	}
+
+	void AutonomousInit()
+	{
+		compressor->Start();
+		drivetrain->SetSafetyEnabled(false);
+		
+		// start & reset encoders
+		right_encoder->Start();
+		left_encoder->Start();
+		
+		right_encoder->Reset();
+		left_encoder->Reset();
+
+		//check digital IOs
+		for (int i = 0; i < 8; i++) 
+		{
+			digitalIOs[i] = driverStation->GetDigitalIn(i+1); // because they are labeled 1-8
+			// but we don't want messy arrays and do want all numbers to match up
+		}
+#if USE_COUNTER
+		testShooterCounter->Start();
+#else
+		blue_shooter_encoder->Start();
+#endif	
+
+#if USE_COUNTER
+		testShooterCounter->Reset();
+#else
+		blue_shooter_encoder->Reset();
+#endif
+		left_encoder->Start();
+		left_encoder->Reset();
+		right_encoder->Start();
+		right_encoder->Reset();
+		
+		drivetrain->SetSafetyEnabled(false);
+		
+		autoTimer->Start();
+		autoTimer->Reset();
+		
+		//all modes: gear down
+		gearUp->Set(false);
+		gearDown->Set(true);
+		
+		//SpinAutoClock(1425);
+		
+		//ShootAuto(3, 6500.0f);
+		//TurnShooterOff();
+		
+		
+		if(digitalIOs[0])
+		{
+			//shoot 3 frisbees
+			//is exactly the same code as autoShoot
+			DeployIntake();
+			DeployShooter();
+			Wait(1.0);
+			ShootAuto(3, bangbangValue);
+			Wait(3.0);
+			TurnShooterOff();
+		}
+		//Start at Auto Line, go back to center, pick up 1 (or 2?) frisbees, return to autoline, shoot
+		else if(digitalIOs[1])
+		{
+			DeployShooter();
+			Wait(1.0);
+			DeployIntake();
+			ShootAuto(3, bangbangValue);
+			TurnIntakeHopperOn();
+			DriveBackwardRampDown(3050);
+			//pick up.
+			DriveForwardAuto(3050);
+			ShootAuto(3, bangbangValue);
+		}
+		else if(digitalIOs[2])
+		{
+			DeployShooter();
+			Wait(1.0);
+			DeployIntake();
+			//with intake down
+			ShootAuto(3, bangbangValue);
+			SpinAutoClock(1425);//SpinAutoClock(1259);//(1360); //turn test: 1249
+			TurnIntakeHopperOn();
+			DriveBackwardAuto(550);//(550);
+			//pick up
+			DriveBackwardAuto(200);
+			//pick up
+			DriveForwardAuto(750);//(550);
+			SpinAutoAnti(1480);//SpinAutoClock(1259); //turn test: 1249
+			ShootAuto(5, bangbangValue); //should be only 2, but just in case it doesn't make it all the way up.
+			TurnIntakeHopperOff();
+			TurnShooterOff();
+			//SpinAutoClock(1150);
+		}
+		else if(digitalIOs[3])
+		{ 
+			//start at front of pyramid facing back, back up to pick up two frisbees.
+			//put hopper up, shoot 3 at high angle
+			//put hopper down, go back, pick up 2 at center
+			//shoot.
+			DeployIntake();
+			DriveBackwardAuto(550);
+			DriveBackwardAuto(200);
+			SpinAutoClock(1425);//(1259);
+			ShootAuto(4, bangbangValue);
+			DeployShooter();
+			DriveBackwardAuto(3050);
+			ShootAuto(2, bangbangValue);	
+		}
+		//start at leftt corner
+		else if(digitalIOs[4])
+		{
+			DeployShooter();
+			Wait(1.0);
+			DeployIntake();
+			ShootAuto(3, bangbangValue);
+			TurnIntakeHopperOn();
+			//back up
+			DriveBackwardAuto(3700);
+			//spin, ~120 degrees
+			SpinAutoAnti(820);
+			DriveBackwardAuto(2800);
+			SpinAutoClock(710);
+			ShootAuto(5, bangbangValue);
+		}
+		
+		//all versions, switch gears.
+		gearUp->Set(true);
+		gearDown->Set(false);
+	}
+
+	void AutonomousPeriodic()
+	{
+		//compressor->Start();
+	}
+
+	void TeleopInit()
+	{		
+		compressor->Start();
+		drivetrain->SetSafetyEnabled(false);
+		
+		// TODO: Comment / uncomment to test avg count encoder
+		// start & reset encoders
+		right_encoder->Start();
+		left_encoder->Start();
+		right_encoder->Reset();
+		left_encoder->Reset();
+		
+		
+#if USE_COUNTER
+		testShooterCounter->Start();
+#else
+		blue_shooter_encoder->Start();
+#endif	
+
+#if USE_COUNTER
+		testShooterCounter->Reset();
+#else
+		blue_shooter_encoder->Reset();
+#endif
+		
+		//turn all motors off
+		TurnShooterOff();
+		trigger->Set(0.0);
+		TurnIntakeHopperOff();
+		
+		//undeploy intake
+		//UndeployIntake();
+	}
+	
+
+	void TeleopPeriodic() 
+	{
+		compressor->Start();
+		
+		//set how often this loops.
+		//this->SetPeriod(1.0/500.0);
+		
+		//check digital IOs
+		for (int i = 0; i < 8; i++) 
+		{
+			digitalIOs[i] = driverStation->GetDigitalIn(i+1); // because they are labeled 1-8
+			// but we don't want messy arrays and do want all numbers to match up
+		}
+		
+		//Reset drivetrain encoders. Not really needed ever.
+		if(driverL->GetRawButton(8))
+		{
+			left_encoder->Reset();
+			right_encoder->Reset();
+		}
+		
+		//shifting and drivetrain. contained in other files
+		bool shiftUp = driverL->GetRawButton(kButtonShiftUp);
+		bool shiftDown = driverL->GetRawButton(kButtonShiftDown);
+		runShifting(shiftUp, shiftDown, gearUp, gearDown);
+		runDrivetrain(driverL->GetY(), driverR->GetY(), drivetrain);//, driverStation->GetAnalogIn(2));
+		
+		// Toggler for shooter deploy (up and down)
+		shooterDeployToggler->toggle(joystick3->GetRawButton(kButtonShooterDeployToggle));
+		if(shooterDeployToggler->isRecentlyChanged())
+		{
+			if(shooterDeployToggler->status())
+			{
+				DeployShooter();
+				printf("shooterdeploy! ");
+			}
+			else
+			{
+				UndeployShooter();
+				printf("shooterUNdeploy... ");
+			}
+		}
+		
+		if(driverL->GetRawButton(8))
+		{
+			TurnShooterOn();
+		}
+		
+		
+		//Put in climber deploy on a toggle
+		climberDeployToggler->toggle(driverR->GetRawButton(kButtonClimberDeployToggle));
+		if(climberDeployToggler->isRecentlyChanged())
+		{
+			if(climberDeployToggler->status())
+			{
+				DeployClimber();
+				printf("deploy");
+			}
+			else
+			{
+				UndeployClimber();
+				printf("undeploy");
+			} 
+		}
+		
+		//Run the conveyor and the intake on a toggle.
+		conveyorToggler->toggle(joystick3->GetRawButton(kButtonConveyor));
+		if(conveyorToggler->status())
+		{
+			TurnIntakeHopperOn();
+		}
+		else
+		{
+			TurnIntakeHopperOff();
+		}
+		
+		// Trigger wheel
+		if(joystick3->GetRawButton(kButtonTrigger) && shooterToggler->status())//, when you have time test adding that in
+		{		
+			float rpm = (60.0f / (100.0f * testShooterCounter->GetPeriod())) * (75.0f / 7.0f);
+			float triggerRpm = 6750; //This is the lower limit for shooting
+
+			//Delay for trigger: If rpm is too low, prevent shooting
+			if(rpm <= triggerRpm)
+			{
+				trigger->Set(0.0);
+			}
+			else
+			{
+				trigger->Set(1.0);
+			}
+			printf("trigger!\n");
+		}
+		else
+		{
+			trigger->Set(0.0);
+		}
+		
+		// Toggle the shooter
+		if(joystick3->GetRawButton(6))
+		{
+			
+		}
+		//shooterToggler->toggle(joystick3->GetRawButton(kButtonShooterToggle));
+		if(shooterToggler->status())
+		{
+			//TurnShooterOn();
+			//bangbang(400,400);
+		
+#if USE_COUNTER
+			bangbangCounter(bangbangValue);
+#else
+			bangbang(bangbangValue);
+#endif
+			//bangbang(21739,14285);//21739,14285);//17241, 14285);//19231, 14285);//21739, 14285);
+		}
+		else
+		{
+			TurnShooterOff();
+		}
+		
+		// Put in toggle for the intake deploy (flip in and out.)
+		intakeToggler->toggle(joystick3->GetRawButton(kButtonIntakeDeployToggle));
+		if(intakeToggler->isRecentlyChanged())
+		{
+			if (intakeToggler->status())
+			{
+				DeployIntake();
+				intakeRoller->Set(-0.0);
+				printf("intakedeploy! ");
+			}
+			else
+			{
+				UndeployIntake();
+				printf("intakeUNdeploy... ");
+			}
+		}
+
+		//Clear the system.
+		if(joystick3->GetRawButton(kButtonClearSystem))
+		{
+			ClearSystem();
+		}
+		else if(joystick3->GetRawButton(kButtonClearIntake))
+		{
+			ClearIntake();
+		}
+		
+		
+		//all printfs.
+		//printf("8: %i, 9: %i\n", triggerProximitySensor8->Get(), triggerProximitySensor9->Get());
+		printf("leftencoder: %i, rightencoder: %i\n", left_encoder->Get(), right_encoder->Get());
+		//printf("blue: %f\n", blue_shooter_encoder->GetRate());
+		//printf("encoder: %f\n", (60.0f / (100.0f * testShooterCounter->GetPeriod())) * (75.0f / 7.0f));
+		
+		
+		driverStationLCD->UpdateLCD();
+		//TimerUpdate();
+	}
+
+	/**
+	 * Runs during test mode
+	 */
+	void TestInit()
+	{
+		left_encoder->Start();
+		right_encoder->Start();
+		left_encoder->Reset();
+		right_encoder->Reset();
+		
+#if USE_COUNTER
+		testShooterCounter->Start();
+#else
+		blue_shooter_encoder->Start();
+#endif
+		
+		
+		testLoops = 0;
+	}
+	void TestPeriodic() 
+	{
+		/*testLoops++;
+		if(testLoops < 50)
+		{
+			drivetrain->TankDrive(1.0, -1.0);
+		}
+		else
+		{
+			drivetrain->TankDrive(0.0, 0.0);
+		}*/
+		//float a = driverStation->GetAnalogIn(1)/5;
+		//drivetrain->TankDrive(a, a);
+		/*float a = joystick3->GetY();
+		printf("%f\n", a);
+		shooterOrange->Set(-a);
+		shooterBlue->Set(-a);
+		*///printf("left: %i, right: %i\n", left_encoder->Get(), right_encoder->Get());
+		//printf("blue: %f, orange: %f\n", blue_shooter_encoder->GetRate(), orange_shooter_encoder->GetRate());
+	}
+	
+	//disabled
+	void DisabledInit()
+	{
+		intakeToggler->disable();
+		conveyorToggler->disable();
+		shooterToggler->disable();
+		shooterDeployToggler->disable();
+		climberDeployToggler->disable();
+		drivetrain->TankDrive(0.0,0.0);
+	}
+	
+	void DisabledPeriodic()
+	{
+		
+	}
+	
+	void DeployIntake()
+	{
+		printf("Deploy intake!\n");
+		
+		intakeDeploy->Set(true);
+		intakeUndeploy->Set(false);
+		
+		driverStationLCD->PrintfLine((DriverStationLCD::Line) 1, "intake deploy  ");
+		
+		TimerSetTimeout(2.0);
+		TimerStart();
+	}
+	
+	void StartIntakeMotor(void)
+	{
+		printf("Start intake motor!\n");
+		intakeRoller->Set(1.0); //backwards
+	}
+
+	
+	void UndeployIntake()
+	{
+		printf("Stopped intake motor!\n");
+		intakeRoller->Set(-0.0);
+		
+		printf("Undeploy intake!\n");
+		intakeDeploy->Set(false);
+		intakeUndeploy->Set(true);
+
+		driverStationLCD->PrintfLine((DriverStationLCD::Line) 1, "intake undeploy");
+	}
+	
+	void DeployShooter()
+	{
+		shooterDeploy->Set(true);
+		shooterUndeploy->Set(false);
+		
+		driverStationLCD->PrintfLine((DriverStationLCD::Line) 2, "hopper deploy  ");
+	}
+	
+	void UndeployShooter()
+	{
+		shooterDeploy->Set(false);
+		shooterUndeploy->Set(true);
+		driverStationLCD->PrintfLine((DriverStationLCD::Line) 2, "hopper undeploy");
+	}
+	
+	void DeployClimber()
+	{
+		climberDeploy->Set(true);
+		climberUndeploy->Set(false);
+		driverStationLCD->PrintfLine((DriverStationLCD::Line) 5, "climber deploy  ");
+	}
+	
+	void UndeployClimber()
+	{
+		climberDeploy->Set(false);
+		climberUndeploy->Set(true);
+		driverStationLCD->PrintfLine((DriverStationLCD::Line) 5, "climber undeploy");
+	}
+		
+	void TurnShooterOn()
+	{
+		//shooterOrange->Set(0.7);
+		//shooterOrange->Set(0.85);
+		//shooterBlue->Set(0.85);
+		shooterOrange->Set(1.0);
+		shooterBlue->Set(1.0);
+		driverStationLCD->PrintfLine((DriverStationLCD::Line) 3, "shooter on ");
+	}
+	
+	void TurnShooterOff()
+	{
+		shooterOrange->Set(0.0);
+		shooterBlue->Set(0.0);
+		
+		driverStationLCD->PrintfLine((DriverStationLCD::Line) 3, "shooter off");
+	}
+	
+	
+	
+	
+	// 6000? rpm
+#if USE_COUNTER
+	void bangbangCounter(float topRpm)
+	{
+		//set motors at 1.0 if under target, 0.0 if over target
+		float rpm = (60.0f / (100.0f * testShooterCounter->GetPeriod())) * (75.0f / 7.0f);
+
+		printf("RPM: %f\n", rpm);
+		
+		if(rpm <= topRpm)
+		{
+//			printf("k");
+			shooterBlue->Set(1.0);
+			shooterOrange->Set(1.0);
+		}
+		else
+		{
+//			printf("n");
+			shooterBlue->Set(0.0);
+			shooterOrange->Set(0.0);
+		}
+		driverStationLCD->PrintfLine((DriverStationLCD::Line) 3, "shooter on ");
+	}
+	
+#else
+	// Mutliply rates by 25/8  ?
+	void bangbang(float topBlueValue)
+	{
+		//set motors at 1.0 if under target, 0.0 if over target
+		float blueShooterEncoderValue = blue_shooter_encoder->GetRate();
+		
+		printf("Encode value: %f\n", blueShooterEncoderValue);
+		
+		//if(blueShooterEncoderValue <= topBlueValue)
+		/*if(blueShooterEncoderValue >= 0-topBlueValue)
+		{
+			printf("k");
+			shooterBlue->Set(1.0);
+			shooterOrange->Set(1.0);
+		}
+		else
+		{
+			printf("n");
+			shooterBlue->Set(0.0);
+			shooterOrange->Set(0.0);
+		}*/
+		driverStationLCD->PrintfLine((DriverStationLCD::Line) 3, "shooter on ");
+	}
+		
+#endif
+	
+	
+	void TurnIntakeHopperOn()
+	{
+		conveyor->Set(-1.0);
+		//don't run intake if the tail's up. TODO
+		intakeRoller->Set(1.0);
+		//intakeRoller->Set(1.0);
+		driverStationLCD->PrintfLine((DriverStationLCD::Line) 0, "conveyor on ");
+	}
+	
+	void TurnIntakeHopperOff()
+	{
+		intakeRoller->Set(-0.0);
+		conveyor->Set(-0.0);
+		driverStationLCD->PrintfLine((DriverStationLCD::Line) 0, "conveyor off");
+	}
+	
+	void ClearSystem()
+	{
+		DeployIntake();
+		intakeRoller->Set(-1.0);
+		conveyor->Set(1.0);
+		trigger->Set(-1.0);
+		//shooterOrange->Set(-0.05);
+	}
+	
+	void ClearIntake()
+	{
+		DeployIntake();
+		intakeRoller->Set(-1.0);
+	}
+	
+	//Drivetrain shifting
+
+	void runShifting(bool shiftUpValue, bool shiftDownValue, Solenoid *gearUpSolenoid, Solenoid *gearDownSolenoid)
+	{
+		// Only shift if a shift button is pressed
+		if(shiftUpValue || shiftDownValue)
+		{
+			if(shiftUpValue)
+			{
+				printf("gear up\n");
+				driverStationLCD->PrintfLine((DriverStationLCD::Line) 6, "high gear");
+				gearUpSolenoid->Set(true);
+				gearDownSolenoid->Set(false);
+			}
+			if(shiftDownValue)
+			{
+				driverStationLCD->PrintfLine((DriverStationLCD::Line) 6, "low gear ");
+				printf("gear down\n");
+				gearUpSolenoid->Set(false);
+				gearDownSolenoid->Set(true);
+			}
+		}
+		driverStationLCD->UpdateLCD();
+	}
+
+	//Autonomous routines
+	
+	void ShootAuto(int numShots, float bangbangvalue) //donot change to camelcase
+	{	
+		printf("Shooter deployed");
+		float timeShot = 1.0; //how long to spin up to start?
+		float timePrep = 0.3 + 0.3;//.6; //how long to shoot one frisbee? 
+		autoTimer->Start();
+		autoTimer->Reset();
+		while(IsAutonomous() && autoTimer->Get() < (timeShot + timePrep*numShots))
+		{
+			//bangbang(21739, 14285);
+			//TurnShooterOn(); //375
+	
+			TurnIntakeHopperOn();
+			float a = fmod(autoTimer->Get()-timeShot, timePrep);
+			
+			if(autoTimer->Get() > timeShot && a >0.3 && autoTimer->Get() < timeShot + timePrep*numShots)
+			{
+				trigger->Set(1.0);
+			}
+			else if(autoTimer->Get() <= timeShot + timePrep*numShots)
+			{
+				trigger->Set(0.0);
+			}
+			else
+			{
+				break;
+			}
+#if USE_COUNTER
+			bangbangCounter(bangbangvalue);
+#else
+			bangbang(bangbangvalue);
+#endif
+
+			//trigger->Set(0.0); //TODO testing
+		}
+		trigger->Set(0.0);
+		TurnIntakeHopperOff();
+		TurnShooterOff();
+		Wait(0.5);
+	}
+	
+	void DriveForwardAuto(int numEncoderClicks)
+	{
+		left_encoder->Reset();
+		right_encoder->Reset();
+		printf("Drive Forward:\n");
+		while(IsAutonomous() && (left_encoder->Get()>(0-numEncoderClicks)) || right_encoder->Get()<numEncoderClicks)
+		{
+			drivetrain->TankDrive(-1.0,-1.0);
+			printf("left:%i, right:%i\n", left_encoder->Get(), right_encoder->Get());
+		}
+		drivetrain->TankDrive(0.0, 0.0);
+		Wait(0.5);
+	}
+	
+	void DriveBackwardAuto(int numEncoderClicks)
+	{
+		left_encoder->Reset();
+		right_encoder->Reset();
+		printf("Drive Backward:\n");
+		while(IsAutonomous() && (left_encoder->Get()<numEncoderClicks || right_encoder->Get() > (0-numEncoderClicks)))
+		{
+			drivetrain->TankDrive(1.0, 1.0);
+			printf("left: %i, right:%i\n", left_encoder->Get(), right_encoder->Get());
+		}
+		drivetrain->TankDrive(0.0, 0.0);
+		Wait(0.5);
+	}
+	
+	void SpinAutoClock(int numEncoderClicks)
+	{
+		left_encoder->Reset();
+		right_encoder->Reset();
+		while(IsAutonomous() && (left_encoder->Get()>(0-numEncoderClicks) && right_encoder->Get()>(0-numEncoderClicks)))
+		{
+			drivetrain->TankDrive(-1.0,1.0);
+			printf("left:%i, right:%i\n", left_encoder->Get(), right_encoder->Get());
+		}
+		drivetrain->TankDrive(0.0, 0.0);
+		printf("before if: left: %i, right:%i\n", left_encoder->Get(), right_encoder->Get());
+		if(left_encoder->Get()<= (0-numEncoderClicks) || right_encoder->Get() <= (0-numEncoderClicks))
+		{
+				drivetrain->TankDrive(0.0,0.0);
+				printf("left:%i, right:%i\n", left_encoder->Get(), right_encoder->Get());
+		}
+		/*while(IsAutonomous() && (left_encoder->Get()<numEncoderClicks|| right_encoder->Get()<numEncoderClicks))
+		{
+			drivetrain->TankDrive(-1.0,1.0);
+			printf("left:%i, right:%i\n", left_encoder->Get(), right_encoder->Get());
+		}
+		drivetrain->TankDrive(0.0, 0.0);*/
+		Wait(0.5);
+	}
+	
+	void SpinAutoAnti(int numEncoderClicks)
+	{
+		left_encoder->Reset();
+		right_encoder->Reset();
+		while(IsAutonomous() && (left_encoder->Get()<numEncoderClicks && right_encoder->Get()<numEncoderClicks))
+		{
+			drivetrain->TankDrive(1.0,-1.0);
+			printf("left:%i, right:%i\n", left_encoder->Get(), right_encoder->Get());
+		}
+		drivetrain->TankDrive(0.0, 0.0);
+		printf("before if: left: %i, right:%i\n", left_encoder->Get(), right_encoder->Get());
+		if(left_encoder->Get()>= numEncoderClicks || right_encoder->Get() >= numEncoderClicks)
+		{
+				drivetrain->TankDrive(0.0,0.0);
+				printf("left:%i, right:%i\n", left_encoder->Get(), right_encoder->Get());
+		}
+		/*
+		while(IsAutonomous() && (left_encoder->Get()>(0-numEncoderClicks) || right_encoder->Get()>(0-numEncoderClicks)))
+		{
+			drivetrain->TankDrive(1.0,-1.0);
+			printf("left:%i, right:%i\n", left_encoder->Get(), right_encoder->Get());
+		}
+		drivetrain->TankDrive(0.0, 0.0);*/
+		Wait(0.5);
+	}
+	
+	void DriveForwardRamping(int numEncoderClicks)
+	{
+		sendTo = 0.5;
+		while(IsAutonomous() && left_encoder->Get() > (0-numEncoderClicks))
+		{
+			drivetrain->TankDrive(-sendTo, -sendTo);
+			if(left_encoder->Get() < (0-numEncoderClicks - 100))
+			{
+				sendTo += 0.1;
+				if(sendTo >= 1.0)
+				{
+					sendTo = 1.0;
+				}
+			}
+			else
+			{
+				sendTo -= 0.1;
+				if(sendTo <= 0.5)
+				{
+					sendTo = 0.5;
+				}
+			}
+		}
+		drivetrain->TankDrive(0.0, 0.0);
+		Wait(0.5);
+	}
+	
+	void DriveBackwardRampDown(int numEncoderClicks)
+	{
+		left_encoder->Reset();
+		right_encoder->Reset();
+		printf("Drive Backward:\n");
+		sendTo = 1.0;
+		while(IsAutonomous() && (left_encoder->Get()<numEncoderClicks || right_encoder->Get() > (0-numEncoderClicks)))
+		{
+			drivetrain->TankDrive(sendTo, sendTo);
+			printf("left: %i, right:%i\n", left_encoder->Get(), right_encoder->Get());
+			
+			if(left_encoder->Get() > (numEncoderClicks-500) || right_encoder->Get() < (0-(numEncoderClicks-500)))
+			{
+				sendTo = 0.5;
+			}
+		}
+		drivetrain->TankDrive(0.0, 0.0);
+		Wait(0.5);
+	}
+	
+	///////////////////////
+	// Timer stuff
+	///////////////////////
+	
+	
+	int count;
+	int timeout;
+	bool isStarted;
+	
+	void TimerSetTimeout(float t)
+	{
+		timeout = (int)(t * 50);
+		count = 0;
+	}
+	
+	void TimerUpdate()
+	{
+		if(isStarted)
+		{
+			count++;
+			if(count >= timeout)
+			{
+				StartIntakeMotor();	// stupid function pointers
+				count = 0;
+				isStarted = false;
+			}
+		}
+	}
+	
+	void TimerStart()
+	{
+		count = 0;
+		isStarted = true;
+	}
+	
+};
+
+START_ROBOT_CLASS(Robot);
